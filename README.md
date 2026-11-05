@@ -62,5 +62,3 @@ The choice is remembered in the browser; switch any time from the header.
 - Prediction, upload and history routes need a signed-in user. Every prediction is saved to that user's history
   (`history.html`); users can run a search again, delete one, or clear all.
 - Five wrong passwords for one email lock it for 10 minutes.
-# SOFC-Crystal-ML
-First official College project under the crystal domain
