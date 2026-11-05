@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: kstar-api
+    runtime: docker
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEV_EMAIL
+        value: dev@gmail.com
+      - key: DEV_PASSWORD
+        sync: false   # enter a strong password in the Render dashboard
+      - key: CORS_ORIGINS
+        value: "*"   # replace with your frontend URL once deployed

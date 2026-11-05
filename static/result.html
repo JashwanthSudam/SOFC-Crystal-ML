@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Result | k* predictor</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css"><script src="theme.js"></script></head>
+<body data-mode="user">
+<header class="top"><div class="wrap">
+  <a class="brand" href="predict.html"><svg viewBox="0 0 28 28" aria-hidden="true"><rect x="5" y="9" width="14" height="14" rx="1" fill="none" stroke="#1D5C78" stroke-width="2"/><rect x="9" y="5" width="14" height="14" rx="1" fill="none" stroke="#1D5C78" stroke-width="2" opacity=".55"/><circle cx="14" cy="14" r="2.6" fill="#C98512"/></svg><span>k<i>*</i> predictor</span></a>
+  <nav class="nav" aria-label="Pages"><a href="predict.html" aria-current="page">Predict</a><a href="history.html">History</a><a href="batch.html">Batch</a><a href="developer.html" class="dev-only">Developer</a><a href="research.html">Research</a></nav>
+  <div class="role"><span id="who"></span><b id="rolename"></b> <a href="#" id="signout">Sign out</a></div>
+</div></header>
+<main><div class="wrap">
+<div class="crumbs"><a href="predict.html">&larr; Back to inputs</a></div>
+<div class="intro"><h1>Your prediction</h1></div>
+<section class="panel" aria-labelledby="h-out" style="max-width:860px">
+  <h2 id="h-out">Predicted k*</h2>
+  <div id="result"><div class="empty"><strong>No prediction yet</strong>Go back and run the model first.</div></div>
+  <div class="actions" style="margin-top:22px"><a class="btn primary" href="predict.html" style="text-decoration:none;display:inline-block">Predict another material</a></div>
+</section>
+<section class="flow dev-only" id="flow"><h2>What happened to your input</h2><div id="stages"></div></section>
+</div></main>
+<script src="config.js"></script><script src="ui.js"></script>
+<script>
+(() => {
+  const ROLE = (() => { try { return localStorage.getItem("kstar-role"); } catch { return null; } })();
+  if (!(() => { try { return localStorage.getItem("kstar-token"); } catch { return null; } })()) { location.replace("index.html"); return; }
+  if (ROLE !== "dev" && ROLE !== "user") { location.replace("index.html"); return; }
+  document.body.dataset.mode = ROLE;
+  document.getElementById("rolename").textContent = ROLE === "dev" ? "Developer" : "Normal user";
+let schema = null;
+  let stored = null;
+  try { stored = JSON.parse(sessionStorage.getItem("kstar-last")); } catch {}
+  if (!stored) { location.replace("predict.html"); return; }
+  schema = stored.schema;
+  const $ = (s, r = document) => r.querySelector(s);
+  /* ---------- rendering ---------- */
+  const hasTemp = () => true;
+  const tempToInv = c => 1000 / (c + 273.15);
+  const invToTemp = i => 1000 / i - 273.15;
+  const sci = x => {
+    if (!isFinite(x) || x === 0) return "0";
+    const e = Math.floor(Math.log10(Math.abs(x)));
+    return `${(x / 10 ** e).toFixed(2)} \u00d7 10<sup>${e}</sup>`;
+  };
+  const esc = s => String(s).replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+
+  function render({ payload, data, roundtrip }){
+    renderResult(payload, data);
+    const sv = data.saved;
+    $("#result").insertAdjacentHTML("beforeend", sv && sv.ok
+      ? `<p class="note">Saved to your history on ${esc(sv.time_ist)}.</p>`
+      : `<div class="msg" role="alert"><strong>Not saved to history.</strong> ${sv ? esc(sv.error || "") : "The server that answered is an old version of the app. Stop it, then start python app.py from the latest folder."}</div>`);
+    if (document.body.dataset.mode === "dev") renderStages(payload, data, roundtrip);
+  }
+
+  const minus = (v, n = 2) => (v < 0 ? "\u2212" : "") + Math.abs(v).toFixed(n);
+  const signed = v => (v >= 0 ? "+" : "\u2212") + Math.abs(v).toFixed(2);
+
+  function metric(lab, val, cls, tip, sub){
+    return `<div class="metric" title="${esc(tip)}"><div><div class="lab">${lab}</div>${sub ? `<div class="msub">${sub}</div>` : ""}</div><div class="val ${cls}">${val}</div></div>`;
+  }
+
+  function verdicts(a){
+    if (!a) return "";
+    const rows = [];
+    const b = a.benchmark;
+    rows.push(metric("Activity vs. LSC Benchmark",
+      b.superior ? `Superior (${minus(b.threshold)} threshold)` : `Below LSC (${minus(b.threshold)} threshold)`,
+      b.superior ? "good" : "warn",
+      `The LSC reference level is log k* = ${minus(b.threshold)}. This prediction is ${Math.abs(b.margin).toFixed(2)} ${b.margin >= 0 ? "above" : "below"} it.`));
+    const st = a.stability;
+    if (!st) {
+      rows.push(metric("Thermodynamic Stability", "Not available", "na", "The stability model could not be loaded."));
+    } else if (st.kind === "input") {
+      rows.push(metric("Thermodynamic Stability",
+        st.stable ? `Stable (Ehull \u2264 ${st.limit})` : `Unstable (Ehull ${st.ehull.toFixed(0)} > ${st.limit})`,
+        st.stable ? "good" : "warn", `Uses the E_above_hull value you entered (${st.ehull.toFixed(1)}). Stable means at or below ${st.limit}.`));
+    } else {
+      const cv = st.cv;
+      rows.push(metric("Thermodynamic Stability",
+        `${st.stable ? "Likely stable" : "Likely unstable"} (Ehull \u2248 ${st.ehull.toFixed(0)})`,
+        st.stable ? "good" : "warn",
+        `E_above_hull estimated from the composition by a model trained on ${cv.n_materials} materials. Tested by leaving one material out at a time, it was right ${Math.round(cv.accuracy * 100)}% of the time at the ${st.limit} limit (always answering "unstable" is right ${Math.round(cv.majority_accuracy * 100)}%).`,
+        `Predicted from the composition &middot; ${Math.round(st.p_stable * 100)}% chance of Ehull \u2264 ${st.limit} &middot; typical error &plusmn;${Math.round(cv.loo_mae)}`));
+    }
+    const dm = a.domain;
+    if (dm) rows.push(metric("Domain Applicability",
+      dm.inside ? `Inside ${dm.level}% ellipsoid` : `Outside ${dm.level}% ellipsoid`, dm.inside ? "info" : "bad",
+      `Distance ${dm.distance} from the centre of the training materials; the ${dm.level}% ellipsoid ends at ${dm.limit}. Outside means the model is extrapolating.`,
+      dm.inside ? "" : "The model is extrapolating here, so treat the prediction as unreliable."));
+    return `<div class="verdicts">${rows.join("")}</div>`;
+  }
+
+  function renderResult(payload, d){
+    const [lo, hi] = schema.scale;
+    const pos = Math.max(0, Math.min(1, (d.log_kstar - lo) / (hi - lo))) * 100;
+    $("#result").innerHTML = `
+      <div class="predcard">
+        <div class="cap">Predicted log k* (cm s<sup>-1</sup>)</div>
+        <div class="logbig">${minus(d.log_kstar, 3)}</div>
+        <p class="sub2">Oxygen tracer surface exchange coefficient<br>k* = <b>${sci(d.kstar)}</b> cm s<sup>-1</sup>. A higher value means faster oxygen exchange.</p>
+        <div class="scale" role="img" aria-label="Position of the prediction on a slower to faster scale">
+          <div class="track"><div class="pin" style="left:${pos}%"></div></div>
+          <div class="ends"><span>slower (${(+lo).toFixed(1)})</span><span>faster (${(+hi).toFixed(1)})</span></div>
+        </div>
+      </div>
+      ${verdicts(d.assessment)}
+      ${d.explain ? shapSection(d.explain) : ""}
+      ${d.sweep ? `<div class="chart"><h3>How it changes with temperature</h3>${chart(d, payload)}<p class="note">Same material, temperature varied from ${d.sweep[0].temp_c} to ${d.sweep.at(-1).temp_c} &deg;C.</p></div>` : ""}
+      ${(d.warnings && d.warnings.length) ? `<div class="msg" role="alert"><strong>Outside the training data:</strong><br>${d.warnings.map(esc).join("<br>")}<br>Treat this prediction as unreliable.</div>` : ""}
+      <p class="caveat">This is a model estimate from a limited dataset. Use it to compare and shortlist materials, then confirm by measurement.</p>`;
+  }
+
+  function chart(d, payload){
+    const W = 560, H = 290, m = { l: 52, r: 18, t: 16, b: 50 };
+    const pts = d.sweep.map(s => ({ x: s.inv_t, y: s.log_kstar }));
+    const cur = payload.values["1000/T"] != null ? { x: payload.values["1000/T"], y: d.log_kstar } : null;
+    const all = cur ? pts.concat(cur) : pts;
+    let x0 = Math.min(...all.map(p => p.x)), x1 = Math.max(...all.map(p => p.x));
+    let y0 = Math.min(...all.map(p => p.y)), y1 = Math.max(...all.map(p => p.y));
+    const px = (x1 - x0) * .06 || .05, py = (y1 - y0) * .15 || .5;
+    x0 -= px; x1 += px; y0 -= py; y1 += py;
+    const X = x => m.l + (x - x0) / (x1 - x0) * (W - m.l - m.r);
+    const Y = y => H - m.b - (y - y0) / (y1 - y0) * (H - m.t - m.b);
+    const line = pts.map((p, i) => (i ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(p.y).toFixed(1)).join(" ");
+    const yt = [0,1,2,3,4].map(i => y0 + (y1 - y0) * i / 4);
+    const xt = [0,1,2,3,4].map(i => x0 + (x1 - x0) * i / 4);
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Predicted log k* against inverse temperature">
+      ${yt.map(v => `<line class="c-grid" x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}"/><text class="c-mut" x="${m.l-8}" y="${Y(v)+4}" text-anchor="end" font-size="11">${v.toFixed(1)}</text>`).join("")}
+      ${xt.map(v => `<text class="c-mut" x="${X(v)}" y="${H-m.b+16}" text-anchor="middle" font-size="11">${v.toFixed(2)}</text><text class="c-faint" x="${X(v)}" y="${H-m.b+30}" text-anchor="middle" font-size="10">${Math.round(invToTemp(v))}&deg;C</text>`).join("")}
+      <line class="c-axis" x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${H-m.b}"/>
+      <line class="c-axis" x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}"/>
+      <path class="c-line" d="${line}" fill="none" stroke-width="2.5"/>
+      ${pts.map(p => `<circle class="c-dot" cx="${X(p.x)}" cy="${Y(p.y)}" r="3"/>`).join("")}
+      ${cur ? `<circle class="c-cur" cx="${X(cur.x)}" cy="${Y(cur.y)}" r="7" stroke-width="2"/>` : ""}
+      <text class="c-ink" x="${(m.l + W - m.r) / 2}" y="${H-4}" text-anchor="middle" font-size="12">1000 / T (K&#8315;&sup1;)</text>
+      <text class="c-ink" transform="translate(14 ${(m.t + H - m.b) / 2}) rotate(-90)" text-anchor="middle" font-size="12">log&#8321;&#8320; k*</text>
+    </svg>`;
+  }
+
+  function shapChart(ex){
+    const TOP = 8;
+    const rows = ex.features.slice(0, TOP).map(r => ({ label: `${r.feature} = ${+r.value.toPrecision(3)}`, v: r.contribution }));
+    const rest = ex.features.slice(TOP);
+    if (rest.length) rows.push({ label: `${rest.length} other feature${rest.length > 1 ? "s" : ""}`, v: rest.reduce((a, r) => a + r.contribution, 0) });
+    let cum = ex.base_value;
+    const bars = rows.map(r => { const s0 = cum; cum += r.v; return { ...r, s: s0, e: cum }; });
+    const W = 640, rh = 28, m = { l: 190, r: 96, t: 40, b: 46 }, H = m.t + bars.length * rh + m.b;
+    const all = bars.flatMap(b => [b.s, b.e]).concat(ex.base_value, ex.prediction);
+    let x0 = Math.min(...all), x1 = Math.max(...all);
+    const pad = (x1 - x0) * .08 || .2; x0 -= pad; x1 += pad;
+    const X = v => m.l + (v - x0) / (x1 - x0) * (W - m.l - m.r);
+    const ticks = [0, 1, 2, 3, 4].map(i => x0 + (x1 - x0) * i / 4);
+    const predRight = ex.prediction >= ex.base_value;
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="SHAP waterfall: how each feature moves the prediction away from the training average">
+      ${ticks.map(v => `<line class="c-grid" x1="${X(v)}" x2="${X(v)}" y1="${m.t - 6}" y2="${H - m.b}"/><text class="c-mut" x="${X(v)}" y="${H - m.b + 16}" text-anchor="middle" font-size="11">${v.toFixed(1)}</text>`).join("")}
+      <line class="c-base" x1="${X(ex.base_value)}" x2="${X(ex.base_value)}" y1="${m.t - 6}" y2="${H - m.b}" stroke-dasharray="4 3"/>
+      <text class="c-mut" x="${X(ex.base_value) + (predRight ? -5 : 5)}" y="${m.t - 14}" text-anchor="${predRight ? "end" : "start"}" font-size="11">average ${minus(ex.base_value)}</text>
+      <line class="c-pred" x1="${X(ex.prediction)}" x2="${X(ex.prediction)}" y1="${m.t - 6}" y2="${H - m.b}" stroke-width="1.5"/>
+      <text class="c-ink" x="${X(ex.prediction) + (predRight ? 5 : -5)}" y="${m.t - 14}" text-anchor="${predRight ? "start" : "end"}" font-size="11" font-weight="600">prediction ${minus(ex.prediction)}</text>
+      ${bars.map((b, i) => {
+        const y = m.t + i * rh + 5, h = rh - 10, xa = Math.min(X(b.s), X(b.e)), w = Math.max(Math.abs(X(b.e) - X(b.s)), 1.5);
+        return `<text class="c-ink" x="${m.l - 10}" y="${y + h / 2 + 4}" text-anchor="end" font-size="12">${esc(b.label)}</text>
+        <rect class="${b.v >= 0 ? "c-up" : "c-down"}" x="${xa}" y="${y}" width="${w}" height="${h}" rx="2"/>
+        ${i < bars.length - 1 ? `<line class="c-conn" x1="${X(b.e)}" x2="${X(b.e)}" y1="${y + h}" y2="${y + rh}"/>` : ""}
+        <text class="c-ink c-halo" x="${xa + w + 6}" y="${y + h / 2 + 4}" font-size="11">${signed(b.v)}</text>`;
+      }).join("")}
+      <text class="c-ink" x="${(m.l + W - m.r) / 2}" y="${H - 6}" text-anchor="middle" font-size="12">log&#8321;&#8320; k*</text>
+    </svg>`;
+  }
+
+  function shapTop(ex){
+    const top = ex.features.slice(0, 5);
+    const vals = top.map(r => r.contribution);
+    const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = (hi - lo) || 1;
+    const zero = (0 - lo) / span * 100;
+    return `<div class="shb"><h3>Top local SHAP contributions</h3>${top.map(r => {
+      const c = r.contribution, left = (Math.min(0, c) - lo) / span * 100, w = Math.abs(c) / span * 100;
+      const tip = Math.max(12, Math.min(88, left + w / 2));
+      return `<div class="shrow" tabindex="0" aria-label="${esc(r.feature)}: ${signed(c)}">
+        <span class="nm" title="${esc(r.feature)}">${esc(r.feature)}</span>
+        <span class="tr"><span class="zero" style="left:${zero}%"></span><span class="fill ${c >= 0 ? "up" : "down"}" style="left:${left}%;width:${w}%"></span>
+          <span class="tip" style="left:${tip}%"><b>${esc(r.feature)}</b><span><i style="background:${c >= 0 ? "var(--chart)" : "var(--signal)"}"></i>${signed(c)} &middot; ${c >= 0 ? "raises" : "lowers"} log k*</span></span></span>
+        <span class="num">${signed(c)}</span></div>`;
+    }).join("")}
+    <p class="note">Top 5 of ${ex.features.length} features. Blue bars push log k* higher (faster exchange), amber bars push it lower. Hover or focus a bar for its value.</p></div>`;
+  }
+
+  function shapSection(ex){
+    return `${shapTop(ex)}
+      <details class="more"><summary>Full SHAP breakdown (waterfall)</summary>
+        <div class="chart" style="margin-top:6px">${shapChart(ex)}
+        <p class="note"><span style="color:var(--chart)">&#9632;</span> pushes k* higher &nbsp; <span style="color:var(--signal)">&#9632;</span> pushes k* lower. The bars start at the average prediction for the training materials and add up to this prediction. ${esc(ex.method)}, using ${ex.n_background} training materials as the reference.</p></div>
+      </details>`;
+  }
+
+  function bars(rows, signed){
+    const max = Math.max(...rows.map(r => Math.abs(r.v)), 1e-9);
+    return `<div class="bars">${rows.map(r => {
+      const w = Math.abs(r.v) / max * 50;
+      const style = r.v >= 0 ? `left:50%;width:${w}%;background:var(--chart)` : `left:${50 - w}%;width:${w}%;background:var(--signal)`;
+      return `<div class="bar"><span class="nm" title="${esc(r.name)}">${esc(r.name)}</span><span class="tr"><span class="zero"></span><span class="fill" style="${style}"></span></span><span class="num">${r.v >= 0 && signed ? "+" : ""}${r.v.toFixed(2)}</span></div>`;
+    }).join("")}</div>`;
+  }
+
+  function stage(title, sub, body){
+    return `<details class="stage" open><summary>${title}<span>${sub}</span></summary><div class="body">${body}</div></details>`;
+  }
+
+  function renderStages(payload, d, roundtrip){
+    const t = d.trace;
+    const model = d.model;
+    const s = [];
+
+    s.push(stage("Form to JSON", "the browser sends raw values", `
+      <pre>${esc(JSON.stringify(payload, null, 2))}</pre>`));
+
+    s.push(stage("Build the DataFrame", "columns reordered to the training order", `
+      <pre>def frame_from(values):
+    names = list(pipeline.feature_names_in_)
+    row = {n: float(values[n]) for n in names}
+    return pd.DataFrame([row], columns=names)</pre>
+      <div class="kv"><span>features <b>${t.columns.length}</b></span><span>first <b>${esc(t.columns[0])}</b></span><span>last <b>${esc(t.columns.at(-1))}</b></span></div>`));
+
+    if (model === "svr") {
+      const rows = t.columns.map((c, i) => ({ name: c, v: t.scaled[i] })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 8);
+      s.push(stage("StandardScaler", "each feature becomes a z-score", `
+        <div class="cols"><div><h4>Code</h4><pre>scaler = StandardScaler().fit(X_train)
+z = scaler.transform(X_new)   # (x - mean) / std</pre></div>
+        <div><h4>Largest z-scores for this input</h4>${bars(rows, true)}</div></div>`));
+      s.push(stage("SVR", "radial basis function regression", `
+        <pre>SVR(kernel="${t.params.kernel}", C=${t.params.C}, epsilon=${t.params.epsilon})
+log_kstar = svr.predict(z)</pre>
+        <div class="kv"><span>support vectors <b>${t.n_support_vectors}</b></span><span>model time <b>${t.latency_ms} ms</b></span></div>`));
+    } else {
+      const contrib = (t.contributions || []).map(c => ({ name: c.feature, v: c.contribution }));
+      s.push(stage("Random Forest", "no scaling needed for trees", `
+        <div class="cols"><div><h4>Code</h4><pre>RandomForestRegressor(n_estimators=100, random_state=42)
+log_kstar = rf.predict(X_new)</pre>
+        <div class="kv"><span>trees <b>${t.n_trees}</b></span><span>model time <b>${t.latency_ms} ms</b></span></div></div>
+        <div><h4>SHAP contribution to this prediction</h4>${contrib.length ? bars(contrib, true) : '<p class="sub">Contributions are not available for this model.</p>'}</div></div>`));
+    }
+
+    s.push(stage("Output", "log value and k*", `
+      <pre>${esc(JSON.stringify({ log_kstar: d.log_kstar, kstar: d.kstar }, null, 2))}</pre>
+      <p class="sub">k* is computed as 10<sup>log_kstar</sup>, assuming the notebook's LogKstar is a base-10 logarithm.</p>`));
+
+    if (d.sweep) {
+      s.push(stage("Temperature sweep", `${d.sweep.length} extra predictions`, `
+        <pre>for c in range(600, 1001, 50):
+    row["1000/T"] = 1000 / (c + 273.15)
+    model.predict(row)</pre>
+        <div class="kv"><span>round trip <b>${Math.round(roundtrip)} ms</b></span><span>sklearn <b>${esc(schema.sklearn_version)}</b></span></div>`));
+    }
+
+    $("#stages").innerHTML = s.join("");
+    requestAnimationFrame(() => document.querySelectorAll(".stage").forEach((el, i) => setTimeout(() => el.classList.add("done"), i * 120)));
+  }
+
+  
+  render({ payload: stored.payload, data: stored.data, roundtrip: stored.roundtrip });
+  if (stored.formula) {
+    const fmt = o => Object.entries(o).map(([e, f]) => esc(e) + " " + (+f.toFixed(3))).join(", ");
+    const s = stored.sites || { A: {}, B: {} };
+    $("#result").insertAdjacentHTML("afterbegin", `<p class="plain" style="margin-bottom:14px"><strong>${esc(stored.formula)}</strong> at ${esc(stored.temp_c)} &deg;C, predicted from the composition alone (A-site: ${fmt(s.A)}; B-site: ${fmt(s.B)}).</p>`);
+  }
+
+})();
+</script></body></html>

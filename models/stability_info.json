@@ -1,0 +1,28 @@
+{
+ "limit": 57.0,
+ "n_materials": 67,
+ "base_rate": 0.209,
+ "loo_r2": 0.49,
+ "loo_mae": 28.7,
+ "loo_rmse": 41.4,
+ "accuracy": 0.851,
+ "majority_accuracy": 0.791,
+ "auc": 0.834,
+ "data_hash": "2d79cb7c1497f221",
+ "cols": [
+  "Ion_A",
+  "Ion_B",
+  "EN_A",
+  "EN_B",
+  "R_A",
+  "R_B",
+  "Sa_A",
+  "Sa_B",
+  "Delec_B",
+  "t",
+  "Ionic_A",
+  "Ionic_B",
+  "SmithAcid_A",
+  "SmithAcid_B"
+ ]
+}

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in | k* predictor</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css"><script src="theme.js"></script></head>
+<body>
+<div class="hero">
+  <section class="hero-art">
+    <div>
+      <h1>How fast can a perovskite exchange oxygen?</h1>
+      <p>Predict the surface exchange coefficient k* of cathode materials for solid oxide fuel cells, from a model trained on measured data.</p>
+    </div>
+    <svg class="cell" viewBox="30 20 250 240" role="img" aria-label="ABO3 perovskite unit cell">
+      <g class="oct"><path d="M155 67 L130 160 L85 137 Z M155 67 L130 160 L225 137 Z M155 207 L130 160 L85 137 Z M155 207 L130 160 L225 137 Z M155 67 L180 115 L85 137 Z M155 67 L180 115 L225 137 Z M155 207 L180 115 L85 137 Z M155 207 L180 115 L225 137 Z"/></g>
+      <path class="edge" d="M60 90H200V230H60Z M110 45H250V185H110Z M60 90L110 45 M200 90L250 45 M200 230L250 185 M60 230L110 185"/>
+      <g class="a"><circle cx="60" cy="90" r="9"/><circle cx="200" cy="90" r="9"/><circle cx="200" cy="230" r="9"/><circle cx="60" cy="230" r="9"/><circle cx="110" cy="45" r="9"/><circle cx="250" cy="45" r="9"/><circle cx="250" cy="185" r="9"/><circle cx="110" cy="185" r="9"/></g>
+      <circle class="b" cx="155" cy="137" r="10"/>
+      <g class="o"><circle cx="130" cy="160" r="6"/><circle cx="180" cy="115" r="6"/><circle cx="85" cy="137" r="6"/><circle cx="225" cy="137" r="6"/><circle cx="155" cy="67" r="6"/><circle cx="155" cy="207" r="6"/></g>
+    </svg>
+    <small>ABO&#8323; unit cell: A-site cations at the corners, the B-site cation at the centre, oxygen on the face centres.</small>
+  </section>
+  <section class="hero-form">
+    <a class="back" href="index.html">&larr; Change role</a>
+    <h2 id="ttl">Sign in</h2>
+    <p class="sub" id="sub"></p>
+    <div class="seg" id="tabs" role="group" aria-label="Account" hidden style="margin-bottom:20px">
+      <button type="button" id="t-in" aria-pressed="true">Sign in</button>
+      <button type="button" id="t-up" aria-pressed="false">Create account</button>
+    </div>
+    <form id="af" novalidate>
+      <div class="field"><label for="em">Gmail</label><input id="em" type="email" autocomplete="email" placeholder="you@gmail.com"></div>
+      <div class="field" style="margin-top:14px"><label for="pw">Password</label>
+        <div class="pwrow"><input id="pw" type="password" autocomplete="current-password" placeholder="At least 8 characters"><button type="button" id="eye" class="btn ghost">Show</button></div></div>
+      <div id="aerr" class="msg" role="alert" hidden style="margin-top:14px"></div>
+      <button class="btn primary" id="ago" type="submit" style="width:100%;margin-top:18px">Sign in</button>
+    </form>
+    <p class="sub" id="note" style="margin-top:16px"></p>
+  </section>
+</div>
+<script src="config.js"></script><script src="ui.js"></script>
+<script>
+  const ROLE = new URLSearchParams(location.search).get("role") === "dev" ? "dev" : "user";
+  const $ = s => document.querySelector(s);
+  let mode = "in";
+  function setMode(m) {
+    mode = ROLE === "dev" ? "in" : m;
+    const up = mode === "up";
+    $("#ttl").textContent = ROLE === "dev" ? "Developer sign in" : up ? "Create your account" : "Welcome back";
+    $("#sub").textContent = ROLE === "dev" ? "Enter your developer email and password." : up ? "Use your Gmail and choose a password. Your searches will be saved to it." : "Sign in to continue. Your earlier searches are waiting.";
+    $("#ago").textContent = up ? "Create account" : "Sign in";
+    $("#pw").autocomplete = up ? "new-password" : "current-password";
+    $("#t-in").setAttribute("aria-pressed", String(!up)); $("#t-up").setAttribute("aria-pressed", String(up));
+    $("#aerr").hidden = true;
+  }
+  $("#tabs").hidden = ROLE === "dev";
+  $("#note").textContent = ROLE === "dev" ? "Developer access is limited to the project owner\u2019s account, so there is no sign up here." : "";
+  $("#t-in").onclick = () => setMode("in"); $("#t-up").onclick = () => setMode("up");
+  $("#eye").onclick = () => { const s = $("#pw").type === "password"; $("#pw").type = s ? "text" : "password"; $("#eye").textContent = s ? "Hide" : "Show"; };
+  setMode("in");
+  $("#af").addEventListener("submit", async e => {
+    e.preventDefault();
+    const err = $("#aerr"), password = $("#pw").value;
+    let email = $("#em").value.trim().replace(/@gmail$/i, "@gmail.com"); $("#em").value = email;
+    const fail = m => { err.textContent = m; err.hidden = false; toast(m, "error"); };
+    err.hidden = true;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail("Enter a valid email address, for example name@gmail.com.");
+    if (!password) return fail("Enter your password.");
+    if (mode === "up" && password.length < 8) return fail("Use a password of at least 8 characters.");
+    const btn = $("#ago"), label = btn.textContent; btn.disabled = true; btn.textContent = "Please wait\u2026";
+    try {
+      const r = await api(mode === "up" ? "/api/auth/signup" : "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, role: ROLE }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Could not sign in.");
+      try { localStorage.setItem("kstar-token", d.token); localStorage.setItem("kstar-role", d.role); localStorage.setItem("kstar-email", d.email); } catch {}
+      location.href = "predict.html";
+    } catch (ex) { fail(ex.message); btn.disabled = false; btn.textContent = label; }
+  });
+</script></body></html>

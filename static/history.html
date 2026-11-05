@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History | k* predictor</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css"><script src="theme.js"></script></head>
+<body data-mode="user">
+<header class="top"><div class="wrap">
+  <a class="brand" href="predict.html"><svg viewBox="0 0 28 28" aria-hidden="true"><rect x="5" y="9" width="14" height="14" rx="1" fill="none" stroke="#1D5C78" stroke-width="2"/><rect x="9" y="5" width="14" height="14" rx="1" fill="none" stroke="#1D5C78" stroke-width="2" opacity=".55"/><circle cx="14" cy="14" r="2.6" fill="#C98512"/></svg><span>k<i>*</i> predictor</span></a>
+  <nav class="nav" aria-label="Pages"><a href="predict.html">Predict</a><a href="history.html" aria-current="page">History</a><a href="batch.html">Batch</a><a href="developer.html" class="dev-only">Developer</a><a href="research.html">Research</a></nav>
+  <div class="role"><span id="who"></span><b id="rolename"></b> <a href="#" id="signout">Sign out</a></div>
+</div></header>
+<main><div class="wrap">
+<div class="intro"><h1>Your saved searches</h1><p>Every prediction you run while signed in is saved here, ready to run again.</p></div>
+<section class="panel" style="max-width:980px">
+  <div class="actions" style="margin:0 0 14px"><button class="btn ghost" id="clr" type="button">Clear history</button></div>
+  <div class="tablewrap"><table class="t" id="htab"></table></div>
+  <div id="hempty" class="empty" hidden><strong>No saved searches yet</strong>Run a prediction and it will appear here.</div>
+</section>
+</div></main>
+<script src="config.js"></script><script src="ui.js"></script>
+<script>
+(() => {
+  const ROLE = (() => { try { return localStorage.getItem("kstar-role"); } catch { return null; } })();
+  if (!(() => { try { return localStorage.getItem("kstar-token"); } catch { return null; } })()) { location.replace("index.html"); return; }
+  if (ROLE !== "dev" && ROLE !== "user") { location.replace("index.html"); return; }
+  document.body.dataset.mode = ROLE;
+  document.getElementById("rolename").textContent = ROLE === "dev" ? "Developer" : "Normal user";
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+  const KIND = { name: "By name", descriptors: "Descriptors", batch: "Batch file" };
+  async function load() {
+    const r = await api("/api/history"), d = await r.json();
+    if (!r.ok) { toast(d.error || "Could not load history.", "error"); return; }
+    const rows = d.searches; $("#hempty").hidden = rows.length > 0; $("#htab").hidden = !rows.length; $("#clr").hidden = !rows.length;
+    $("#htab").innerHTML = "<tr><th>When</th><th>Type</th><th>Material</th><th>T (\u00b0C)</th><th>log k*</th><th>k* (cm/s)</th><th></th></tr>" + rows.map(x => `<tr>
+      <td>${esc(x.time_ist || new Date(x.created).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "medium" }) + " IST")}</td><td>${KIND[x.kind] || esc(x.kind)}</td><td>${esc(x.label)}</td>
+      <td>${x.temp_c == null ? "" : Math.round(x.temp_c)}</td><td>${x.log_kstar == null ? "" : x.log_kstar.toFixed(2)}</td><td>${x.kstar == null ? "" : x.kstar.toExponential(2)}</td>
+      <td>${x.kind === "name" ? `<button class="btn ghost" data-run="${x.id}">Run again</button> ` : ""}<button class="btn ghost" data-del="${x.id}">Delete</button></td></tr>`).join("");
+    window._rows = rows;
+  }
+  $("#htab").addEventListener("click", async e => {
+    const run = e.target.dataset.run, del = e.target.dataset.del;
+    if (run) { const x = window._rows.find(r => r.id == run); try { sessionStorage.setItem("kstar-prefill", JSON.stringify({ formula: x.label, temp_c: Math.round(x.temp_c) })); } catch {} location.href = "predict.html"; }
+    if (del) { const r = await api("/api/history/" + del, { method: "DELETE" }); if (r.ok) { toast("Deleted.", "ok"); load(); } else toast("Could not delete.", "error"); }
+  });
+  $("#clr").onclick = async () => { if (!confirm("Delete all your saved searches?")) return; const r = await api("/api/history/clear", { method: "POST" }); if (r.ok) { toast("History cleared.", "ok"); load(); } };
+  load().catch(() => toast("Could not load history.", "error"));
+})();
+</script></body></html>
