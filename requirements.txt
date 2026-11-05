@@ -6,3 +6,4 @@ joblib
 openpyxl       # only needed by train.py to read the .xlsx dataset
 gunicorn       # only for hosting (Dockerfile)
 huggingface_hub # optional: model hosting on the Hub
+   psycopg2-binary
