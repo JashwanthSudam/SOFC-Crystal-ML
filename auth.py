@@ -1,10 +1,11 @@
-"""Accounts, sign-in tokens and saved searches (SQLite). Passwords are stored as salted hashes, never as text."""
+"""Accounts, sign-in tokens and saved searches.
+Uses Postgres when DATABASE_URL is set (needed on Vercel), otherwise a local SQLite file.
+Passwords are stored as salted hashes, never as text."""
 import json
 import os
 import re
 import secrets
 import sqlite3
-import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,15 +13,23 @@ from pathlib import Path
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
-BASE = Path(__file__).parent
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:  # only needed when DATABASE_URL is set
+    psycopg2 = None
 
-# On Vercel the project folder is read-only; /tmp is the only writable place.
-# Note: /tmp is wiped on cold starts, so data here is temporary.
+BASE = Path(__file__).parent
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
+USE_PG = bool(DATABASE_URL)
+
+# Local SQLite path (used only when DATABASE_URL is not set).
 if os.environ.get("VERCEL"):
     DB = Path(os.environ.get("DB_PATH") or "/tmp/app.db")
 else:
     DB = Path(os.environ.get("DB_PATH") or BASE / "data" / "app.db")
 
+INTEGRITY_ERRORS = (sqlite3.IntegrityError,) + ((psycopg2.IntegrityError,) if psycopg2 else ())
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TOKEN_DAYS = 7
 # The one and only developer account. Change it on a public host with DEV_EMAIL and DEV_PASSWORD.
@@ -38,24 +47,80 @@ def _secret():
     return f.read_text().strip()
 
 
+class _Conn:
+    """Small wrapper so the same code runs on SQLite and Postgres."""
+
+    def __init__(self):
+        if USE_PG:
+            if psycopg2 is None:
+                raise RuntimeError("DATABASE_URL is set but psycopg2 is not installed. "
+                                   "Add psycopg2-binary to requirements.txt.")
+            self.raw = psycopg2.connect(DATABASE_URL)
+        else:
+            DB.parent.mkdir(parents=True, exist_ok=True)
+            self.raw = sqlite3.connect(DB)
+            self.raw.row_factory = sqlite3.Row
+            self.raw.execute("PRAGMA foreign_keys = ON")
+
+    def execute(self, sql, params=()):
+        if USE_PG:
+            cur = self.raw.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(sql.replace("?", "%s"), params)
+            return cur
+        return self.raw.execute(sql, params)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type:
+            self.raw.rollback()
+        else:
+            self.raw.commit()
+        return False
+
+    def close(self):
+        self.raw.close()
+
+
 def conn():
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys = ON")
-    return c
+    return _Conn()
+
+
+def _insert(c, sql, params):
+    """Run an INSERT and return the new row id on either database."""
+    if USE_PG:
+        return c.execute(sql + " RETURNING id", params).fetchone()["id"]
+    return c.execute(sql, params).lastrowid
+
+
+SCHEMA_SQLITE = """
+    CREATE TABLE IF NOT EXISTS users(
+        id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, pw_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('user','dev')), created TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS searches(
+        id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, temp_c REAL, model TEXT,
+        log_kstar REAL, kstar REAL, detail TEXT);"""
+
+SCHEMA_PG = [
+    """CREATE TABLE IF NOT EXISTS users(
+        id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, pw_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('user','dev')), created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS searches(
+        id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, temp_c DOUBLE PRECISION, model TEXT,
+        log_kstar DOUBLE PRECISION, kstar DOUBLE PRECISION, detail TEXT)""",
+]
 
 
 def init():
     with closing(conn()) as c, c:
-        c.executescript("""
-            CREATE TABLE IF NOT EXISTS users(
-                id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, pw_hash TEXT NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('user','dev')), created TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS searches(
-                id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                created TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, temp_c REAL, model TEXT,
-                log_kstar REAL, kstar REAL, detail TEXT);""")
+        if USE_PG:
+            for stmt in SCHEMA_PG:
+                c.execute(stmt)
+        else:
+            c.raw.executescript(SCHEMA_SQLITE)
 
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
@@ -82,10 +147,10 @@ def create_user(email, password, role="user"):
         raise ValueError("Use a password of at least 8 characters.")
     try:
         with closing(conn()) as c, c:
-            cur = c.execute("INSERT INTO users(email, pw_hash, role, created) VALUES (?,?,?,?)",
-                            (email, generate_password_hash(password), role, _now()))
-            return {"id": cur.lastrowid, "email": email, "role": role}
-    except sqlite3.IntegrityError:
+            new_id = _insert(c, "INSERT INTO users(email, pw_hash, role, created) VALUES (?,?,?,?)",
+                             (email, generate_password_hash(password), role, _now()))
+            return {"id": new_id, "email": email, "role": role}
+    except INTEGRITY_ERRORS:
         raise ValueError("That email is already registered. Try signing in.")
 
 
@@ -111,7 +176,7 @@ def check_login(email, password, role):
         email = clean_email(email)
     except ValueError:
         return None
-    with closing(conn()) as c:
+    with closing(conn()) as c, c:
         row = c.execute("SELECT * FROM users WHERE email=? AND role=?", (email, role)).fetchone()
     if row and check_password_hash(row["pw_hash"], str(password or "")):
         return {"id": row["id"], "email": row["email"], "role": row["role"]}
@@ -135,25 +200,19 @@ def user_from_header(header):
         return None
     with closing(conn()) as c, c:  # the account must still exist
         row = c.execute("SELECT id, email, role FROM users WHERE id=?", (data["id"],)).fetchone()
-        if not row and os.environ.get("VERCEL"):
-            # /tmp is per-instance on Vercel, so rebuild the account from the signed token
-            c.execute("INSERT OR IGNORE INTO users(id, email, pw_hash, role, created) VALUES (?,?,?,?,?)",
-                      (data["id"], data["email"], "!", data["role"], _now()))
-            row = c.execute("SELECT id, email, role FROM users WHERE id=?", (data["id"],)).fetchone()
     return dict(row) if row else None
 
 
 def add_search(user_id, kind, label, temp_c, model, log_kstar, kstar, detail=None):
     with closing(conn()) as c, c:
-        cur = c.execute("INSERT INTO searches(user_id, created, kind, label, temp_c, model, log_kstar, kstar, detail) "
-                        "VALUES (?,?,?,?,?,?,?,?,?)",
-                        (user_id, _now(), kind, str(label)[:200], temp_c, model, log_kstar, kstar,
-                         json.dumps(detail) if detail is not None else None))
-        return cur.lastrowid
+        return _insert(c, "INSERT INTO searches(user_id, created, kind, label, temp_c, model, log_kstar, kstar, detail) "
+                          "VALUES (?,?,?,?,?,?,?,?,?)",
+                       (user_id, _now(), kind, str(label)[:200], temp_c, model, log_kstar, kstar,
+                        json.dumps(detail) if detail is not None else None))
 
 
 def list_searches(user_id, limit=200):
-    with closing(conn()) as c:
+    with closing(conn()) as c, c:
         rows = c.execute("SELECT id, created, kind, label, temp_c, model, log_kstar, kstar FROM searches "
                          "WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit)).fetchall()
     return [dict(r) for r in rows]
@@ -170,5 +229,5 @@ def clear_searches(user_id):
 
 
 def count_searches():
-    with closing(conn()) as c:
-        return c.execute("SELECT COUNT(*) FROM searches").fetchone()[0]
+    with closing(conn()) as c, c:
+        return c.execute("SELECT COUNT(*) AS n FROM searches").fetchone()["n"]
