@@ -133,8 +133,13 @@ def user_from_header(header):
         data = _ser().loads(header[7:], max_age=TOKEN_DAYS * 86400)
     except (BadSignature, SignatureExpired):
         return None
-    with closing(conn()) as c:  # the account must still exist
+    with closing(conn()) as c, c:  # the account must still exist
         row = c.execute("SELECT id, email, role FROM users WHERE id=?", (data["id"],)).fetchone()
+        if not row and os.environ.get("VERCEL"):
+            # /tmp is per-instance on Vercel, so rebuild the account from the signed token
+            c.execute("INSERT OR IGNORE INTO users(id, email, pw_hash, role, created) VALUES (?,?,?,?,?)",
+                      (data["id"], data["email"], "!", data["role"], _now()))
+            row = c.execute("SELECT id, email, role FROM users WHERE id=?", (data["id"],)).fetchone()
     return dict(row) if row else None
 
 
