@@ -14,15 +14,13 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE = Path(__file__).parent
 
-# Vercel's deployed application directory is read-only. Always use /tmp
-# on Vercel, even if an old relative DB_PATH environment variable is set.
-# IMPORTANT: /tmp is ephemeral; use a hosted database for durable production data.
-if os.environ.get("VERCEL") == "1":
-    DB = Path("/tmp/kstar-app-data/app.db")
-elif os.environ.get("DB_PATH"):
-    DB = Path(os.environ["DB_PATH"])
+# On Vercel the project folder is read-only; /tmp is the only writable place.
+# Note: /tmp is wiped on cold starts, so data here is temporary.
+if os.environ.get("VERCEL"):
+    DB = Path(os.environ.get("DB_PATH") or "/tmp/app.db")
 else:
-    DB = BASE / "data" / "app.db"
+    DB = Path(os.environ.get("DB_PATH") or BASE / "data" / "app.db")
+
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TOKEN_DAYS = 7
 # The one and only developer account. Change it on a public host with DEV_EMAIL and DEV_PASSWORD.
@@ -94,3 +92,78 @@ def create_user(email, password, role="user"):
 def upsert_developer(email, password):
     email = clean_email(email)
     if len(str(password or "")) < 6:  # developer accounts are made by the owner; users still need 8
+        raise ValueError("Use a password of at least 6 characters.")
+    with closing(conn()) as c, c:
+        c.execute("INSERT INTO users(email, pw_hash, role, created) VALUES (?,?,'dev',?) "
+                  "ON CONFLICT(email) DO UPDATE SET pw_hash=excluded.pw_hash, role='dev'",
+                  (email, generate_password_hash(password), _now()))
+
+
+def seed_developer():
+    """Make sure exactly one developer account exists, with the configured email and password."""
+    upsert_developer(DEV_EMAIL, DEV_PASSWORD)
+    with closing(conn()) as c, c:
+        c.execute("DELETE FROM users WHERE role='dev' AND email<>?", (clean_email(DEV_EMAIL),))
+
+
+def check_login(email, password, role):
+    try:
+        email = clean_email(email)
+    except ValueError:
+        return None
+    with closing(conn()) as c:
+        row = c.execute("SELECT * FROM users WHERE email=? AND role=?", (email, role)).fetchone()
+    if row and check_password_hash(row["pw_hash"], str(password or "")):
+        return {"id": row["id"], "email": row["email"], "role": row["role"]}
+    return None
+
+
+def _ser():
+    return URLSafeTimedSerializer(_secret(), salt="kstar-auth")
+
+
+def make_token(user):
+    return _ser().dumps({"id": user["id"], "role": user["role"], "email": user["email"]})
+
+
+def user_from_header(header):
+    if not str(header).startswith("Bearer "):
+        return None
+    try:
+        data = _ser().loads(header[7:], max_age=TOKEN_DAYS * 86400)
+    except (BadSignature, SignatureExpired):
+        return None
+    with closing(conn()) as c:  # the account must still exist
+        row = c.execute("SELECT id, email, role FROM users WHERE id=?", (data["id"],)).fetchone()
+    return dict(row) if row else None
+
+
+def add_search(user_id, kind, label, temp_c, model, log_kstar, kstar, detail=None):
+    with closing(conn()) as c, c:
+        cur = c.execute("INSERT INTO searches(user_id, created, kind, label, temp_c, model, log_kstar, kstar, detail) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        (user_id, _now(), kind, str(label)[:200], temp_c, model, log_kstar, kstar,
+                         json.dumps(detail) if detail is not None else None))
+        return cur.lastrowid
+
+
+def list_searches(user_id, limit=200):
+    with closing(conn()) as c:
+        rows = c.execute("SELECT id, created, kind, label, temp_c, model, log_kstar, kstar FROM searches "
+                         "WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_search(user_id, sid):
+    with closing(conn()) as c, c:
+        return c.execute("DELETE FROM searches WHERE id=? AND user_id=?", (sid, user_id)).rowcount
+
+
+def clear_searches(user_id):
+    with closing(conn()) as c, c:
+        c.execute("DELETE FROM searches WHERE user_id=?", (user_id,))
+
+
+def count_searches():
+    with closing(conn()) as c:
+        return c.execute("SELECT COUNT(*) FROM searches").fetchone()[0]
