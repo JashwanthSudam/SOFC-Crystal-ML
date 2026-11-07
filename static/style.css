@@ -1,4 +1,3 @@
-
 :root{
   --paper:#F1F4F3; --card:#FFFFFF; --ink:#13252C; --muted:#586C73; --line:#CBD8D8;
   --glaze:#1D5C78; --glaze-soft:#DCEAF0; --signal:#C98512; --err:#B3402F; --ok:#2F7D5B;
@@ -296,3 +295,57 @@ p.note{font-size:13px;color:var(--muted);margin-top:8px}
 .more[open] summary{margin-bottom:4px}
 .metric .msub{font-size:12.5px;color:var(--muted);margin-top:2px;max-width:46ch}
 select{background:var(--input-bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 10px}
+
+/* ---- mobile: phones and tablets (Android, iOS), installed or in the browser ---- */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{-webkit-tap-highlight-color:transparent;overflow-x:hidden}
+.wrap{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env(safe-area-inset-right))}
+header.top{padding-top:env(safe-area-inset-top)}
+main{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
+#toasts{right:max(16px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom))}
+.hero{min-height:100vh;min-height:100dvh}
+.nav{scrollbar-width:none;-webkit-overflow-scrolling:touch}.nav::-webkit-scrollbar{display:none}
+.nav a{white-space:nowrap}
+button,.btn,.nav a,.role-card,.choice{touch-action:manipulation}
+.panel,.tablewrap,.nav{max-width:100%}
+.tablewrap{-webkit-overflow-scrolling:touch}
+svg{max-width:100%;height:auto}
+@media (pointer:coarse){
+  input,select,textarea{font-size:16px}   /* stops iOS zooming into fields */
+  .btn,button,select,input{min-height:44px}
+  .nav a{padding:11px 16px}
+  .tabs button,.seg button{padding:10px 16px}
+  .role a{padding:8px 4px}
+}
+@media (max-width:860px){
+  .hero-art{padding:calc(32px + env(safe-area-inset-top)) 24px 28px;gap:18px}
+  .hero-art h1{max-width:none}
+  .cell{width:min(70%,240px)}
+  .hero-art small{display:none}
+  .hero-form{padding:28px 20px calc(36px + env(safe-area-inset-bottom));max-width:none}
+}
+@media (max-width:640px){
+  .wrap{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+  main{padding-top:20px}
+  .panel{padding:18px 16px;border-radius:14px}
+  .fields{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .pwrow{flex-wrap:nowrap}
+  table.t th,table.t td{padding:8px 8px}
+}
+@media (max-width:400px){.fields{grid-template-columns:1fr}.brand{font-size:18px}}
+@media (orientation:landscape) and (max-height:480px){.hero{min-height:0}.hero-art{padding-top:20px;padding-bottom:20px}.cell{display:none}}
+
+/* ---- dropdowns: always fit their container, on laptop and phone ---- */
+select{max-width:100%;min-width:0;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;
+  -webkit-appearance:none;appearance:none;padding-right:34px!important;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1.5l5 5 5-5' fill='none' stroke='%23586C73' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat;background-position:right 12px center}
+.field,.fields>*,.layout>*,.panel,.grid2>*,.kpis>*{min-width:0}
+.field select,.field input{width:100%}
+.modelpick{flex-wrap:wrap}
+.modelpick select{flex:1 1 220px;max-width:100%}
+@media (max-width:640px){
+  .modelpick{flex-direction:column;align-items:stretch;gap:6px}
+  .modelpick select{width:100%;flex:none}
+}
