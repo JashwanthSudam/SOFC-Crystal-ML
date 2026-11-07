@@ -349,3 +349,12 @@ select{max-width:100%;min-width:0;text-overflow:ellipsis;overflow:hidden;white-s
   .modelpick{flex-direction:column;align-items:stretch;gap:6px}
   .modelpick select{width:100%;flex:none}
 }
+
+/* ---- phone header: title on top, account items underneath and toward the right ---- */
+@media (max-width:640px){
+  header.top{padding-top:max(8px,env(safe-area-inset-top))}
+  header.top .wrap{row-gap:6px;padding-top:4px;padding-bottom:6px}
+  .brand{flex:1 1 100%;margin-right:0}
+  .role{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap}
+  .nav{order:3}
+}
