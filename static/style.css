@@ -358,3 +358,28 @@ select{max-width:100%;min-width:0;text-overflow:ellipsis;overflow:hidden;white-s
   .role{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap}
   .nav{order:3}
 }
+
+/* ---- research-only notice and own-tab toggle ---- */
+.research-bar{background:#0E3345;color:#BFE0EC;font-size:12.5px;line-height:1.4;text-align:center;padding:6px 14px;padding-top:calc(6px + env(safe-area-inset-top))}
+.research-bar strong{color:#E5A63A;letter-spacing:.04em;text-transform:uppercase;font-size:11.5px;margin-right:4px}
+.research-foot{text-align:center;color:var(--muted,#586C73);font-size:12px;padding:18px 16px calc(22px + env(safe-area-inset-bottom))}
+.research-pill{display:inline-block;margin-bottom:14px;padding:5px 12px;border-radius:999px;border:1px solid #E5A63A;color:#E5A63A;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.tabtoggle{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.tabtoggle[aria-pressed="true"]{border-color:var(--glaze,#1D5C78);color:var(--glaze,#1D5C78)}
+@media (max-width:640px){.research-bar{font-size:11.5px;padding-left:10px;padding-right:10px}}
+
+/* ---- motion: pages, panels and tabs ease in; buttons respond; loading spinner ---- */
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes glowpulse{0%,100%{box-shadow:0 0 0 0 rgba(229,166,58,.0)}50%{box-shadow:0 0 0 6px rgba(229,166,58,.18)}}
+main>*:not([hidden]),.panel:not([hidden]){animation:rise .45s cubic-bezier(.2,.7,.2,1) both}
+main>*:nth-child(2){animation-delay:.05s}main>*:nth-child(3){animation-delay:.1s}main>*:nth-child(4){animation-delay:.15s}
+.panel{transition:transform .2s,box-shadow .2s,border-color .2s}
+@media (hover:hover){.panel:hover{transform:translateY(-2px);border-color:var(--glaze,#1D5C78)}}
+.btn,.seg button,.nav a{transition:transform .12s,background .2s,color .2s,border-color .2s,box-shadow .2s}
+.btn:active,.seg button:active{transform:scale(.97)}
+.btn.primary:not(:disabled):hover{box-shadow:0 8px 20px -10px var(--glaze,#1D5C78);transform:translateY(-1px)}
+.btn.primary:disabled::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
+.scale .pin{animation:glowpulse 2.4s ease-in-out infinite;transition:left .9s cubic-bezier(.2,.8,.2,1)}
+.research-pill{animation:glowpulse 2.8s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
